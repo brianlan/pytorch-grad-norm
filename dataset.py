@@ -31,7 +31,6 @@ class RegressionDataset(data.Dataset):
 
     
     def __len__(self):
-        # using 200 to avoid finishing the batches, default was 100
         return 100
 
 

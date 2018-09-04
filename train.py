@@ -44,68 +44,94 @@ def train_toy_example(args):
     weights = []
     task_losses = []
     loss_ratios = []
-    final_layer_names = ['task_{}'.format(i) for i in range(n_tasks)]
+    grad_norm_losses = []
 
     # run n_iter iterations of training
     for t in range(n_iterations):
 
         # get a single batch
         for (it, batch) in enumerate(data_loader):
-
             # get the X and the targets values
             X = batch[0]
             ts = batch[1]
             if torch.cuda.is_available():
                 X = X.cuda()
                 ts = ts.cuda()
-            X = torch.tensor(X, requires_grad=True)
-
-            # clear the gradients
-            optimizer.zero_grad()
 
             # evaluate each task loss L_i(t)
             task_loss = model(X, ts) # this will do a forward pass in the model and will also evaluate the loss
-            # compute the weighted loss L(t)
+            # compute the weighted loss w_i(t) * L_i(t)
             weighted_task_loss = torch.mul(model.weights, task_loss)
-
             # initialize the initial loss L(0) if t=0
             if t == 0:
                 # set L(0)
-                initial_task_loss = task_loss.clone()
-            # get the mean loss
-            loss = weighted_task_loss.mean()
-            # do the backward pass
-            loss.backward(retain_graph=True) # need to retain the graph to be able to use autograd
+                initial_task_loss = task_loss.data.numpy()
 
-            # ignore a gradient to the coefficient vector,
-            # which is computed from the standard loss
-            model.weights.grad = model.weights.grad * 0.0
+            # get the total loss
+            loss = torch.sum(weighted_task_loss)
+            # clear the gradients
+            optimizer.zero_grad()
+            # do the backward pass to compute the gradients for the whole set of weights
+            # This is equivalent to compute each \nabla_W L_i(t)
+            loss.backward(retain_graph=True)
+
+            # set the gradients of w_i(t) to zero because these gradients have to be updated using the GradNorm loss
+            #print('Before turning to 0: {}'.format(model.weights.grad))
+            model.weights.grad.data = model.weights.grad.data * 0.0
+            #print('Turning to 0: {}'.format(model.weights.grad))
+
 
             # switch for each weighting algorithm:
             # --> grad norm
             if args.mode == 'grad_norm':
                 
-                # use $| \nabla_W w_i * L_i  | = w_i | \nabla_W L_i |$
-                
-                # get the GradNorm gradients
-                gygw_norms = []
-                for i, layer_name in enumerate(final_layer_names):
-                    layer = getattr(model.model, layer_name)
-                    gygw = torch.autograd.grad(task_loss[i],layer.parameters(), retain_graph=True)[0]
-                    gygw_norms.append(torch.norm(gygw))
-                gygw_norms = torch.stack(gygw_norms)
-                norms = torch.mul(model.weights, gygw_norms)
+                # get layer of shared weights
+                W = model.get_last_shared_layer()
 
-                mean_norm = torch.mean(norms)
-                loss_ratio = task_loss / initial_task_loss
-                inverse_train_rate = loss_ratio / torch.mean(loss_ratio)
+                # get the gradient norms for each of the tasks
+                # G^{(i)}_w(t) 
+                norms = []
+                for i in range(len(task_loss)):
+                    # get the gradient of this task loss with respect to the shared parameters
+                    gygw = torch.autograd.grad(task_loss[i], W.parameters(), retain_graph=True)
+                    # compute the norm
+                    norms.append(torch.norm(torch.mul(model.weights[i], gygw[0])))
+                norms = torch.stack(norms)
+                #print('G_w(t): {}'.format(norms))
 
-                diff = (norms - (inverse_train_rate ** torch.tensor(args.alpha)) * mean_norm)
-                grad_norm_loss = torch.mean(torch.abs(diff))
-                grad_norm_loss.backward(retain_graph=True)
+
+                # compute the inverse training rate r_i(t) 
+                # \curl{L}_i 
+                loss_ratio = task_loss.data.numpy() / initial_task_loss
+                # r_i(t)
+                inverse_train_rate = loss_ratio / np.mean(loss_ratio)
+                #print('r_i(t): {}'.format(inverse_train_rate))
+
+
+                # compute the mean norm \tilde{G}_w(t) 
+                mean_norm = np.mean(norms.data.numpy())
+                #print('tilde G_w(t): {}'.format(mean_norm))
+
+
+                # compute the GradNorm loss 
+                # this term has to remain constant
+                constant_term = torch.tensor(mean_norm * (inverse_train_rate ** args.alpha), requires_grad=False)
+                #print('Constant term: {}'.format(constant_term))
+                # this is the GradNorm loss itself
+                grad_norm_loss = torch.tensor(torch.sum(torch.abs(norms - constant_term)))
+                #print('GradNorm loss {}'.format(grad_norm_loss))
+
+                # compute the gradient for the weights
+                model.weights.grad = torch.autograd.grad(grad_norm_loss, model.weights)[0]
 
             # do a step with the optimizer
             optimizer.step()
+
+            '''
+            print('')
+            wait = input("PRESS ENTER TO CONTINUE.")
+            print('')
+            '''
 
         # renormalize
         normalize_coeff = n_tasks / torch.sum(model.weights.data, dim=0)
@@ -113,31 +139,38 @@ def train_toy_example(args):
 
         # record
         task_losses.append(task_loss.data.numpy())
-        loss_ratios.append(np.mean(task_losses[-1] / task_losses[0]))
+        loss_ratios.append(np.sum(task_losses[-1] / task_losses[0]))
         weights.append(model.weights.data.numpy())
+        grad_norm_losses.append(grad_norm_loss.data.numpy())
 
         if t % 100 == 0:
-            print('{}/{}: loss_ratio={}, weights={}, task_loss={}'.format(
-                t, args.n_iter, loss_ratios[-1], model.weights.data.numpy(), task_loss.data.numpy()))
+            print('{}/{}: loss_ratio={}, weights={}, task_loss={}, grad_norm_loss={}'.format(
+                t, args.n_iter, loss_ratios[-1], model.weights.data.numpy(), task_loss.data.numpy(), grad_norm_loss.data.numpy()))
 
     task_losses = np.array(task_losses)
     weights = np.array(weights)
 
+    plt.rc('text', usetex=True)
+    plt.rc('font', family='serif')
     fig = plt.figure()
-    ax1 = fig.add_subplot(1, 4, 1)
-    ax1.set_title('loss (task 0)')
-    ax2 = fig.add_subplot(1, 4, 2)
-    ax2.set_title('loss (task 1')
-    ax3 = fig.add_subplot(1, 4, 3)
-    ax3.set_title('sum of normalized losses')
-    ax4 = fig.add_subplot(1, 4, 4)
-    ax4.set_title('change of weights over time')
+    ax1 = fig.add_subplot(2, 3, 1)
+    ax1.set_title(r'Loss (scale $\sigma_0=1.0$)')
+    ax2 = fig.add_subplot(2, 3, 2)
+    ax2.set_title(r'Loss (scale $\sigma_0=100.0)$')
+    ax3 = fig.add_subplot(2, 3, 3)
+    ax3.set_title(r"$\sum_i L_i(t) / L_i(0)$")
+    ax4 = fig.add_subplot(2, 3, 4)
+    ax4.set_title(r'$L_{\text{grad}}$')
+    
+    ax5 = fig.add_subplot(2, 3, 5)
+    ax5.set_title(r'Change of weights $w_i$ over time')
 
     ax1.plot(task_losses[:, 0])
     ax2.plot(task_losses[:, 1])
     ax3.plot(loss_ratios)
-    ax4.plot(weights[:, 0])
-    ax4.plot(weights[:, 1])
+    ax4.plot(grad_norm_losses)
+    ax5.plot(weights[:, 0])
+    ax5.plot(weights[:, 1])
     plt.show()
 
 
