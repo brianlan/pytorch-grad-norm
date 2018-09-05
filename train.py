@@ -24,7 +24,8 @@ def train_toy_example(args):
 
     # define the sigmas, the number of tasks and the epsilons
     # for the toy example
-    sigmas = [1.0, 100.0]
+    sigmas = [1.0, float(args.sigma)]
+    print('Training toy example with sigmas={}'.format(sigmas))
     n_tasks = len(sigmas)
     epsilons = np.random.normal(scale=3.5, size=(n_tasks, 100, 250)).astype(np.float32)
 
@@ -202,6 +203,7 @@ if __name__ == '__main__':
     parser.add_argument('--n-iter', '-it', type=int, default=25000)
     parser.add_argument('--mode', '-m', choices=('grad_norm', 'equal_weight'), default='grad_norm')
     parser.add_argument('--alpha', '-a', type=float, default=0.12)
+    parser.add_argument('--sigma', '-s', type=float, default=100.0)
     args = parser.parse_args()
 
     train_toy_example(args)
