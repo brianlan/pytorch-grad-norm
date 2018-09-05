@@ -65,7 +65,11 @@ def train_toy_example(args):
             # initialize the initial loss L(0) if t=0
             if t == 0:
                 # set L(0)
-                initial_task_loss = task_loss.data.numpy()
+                if torch.cuda.is_available():
+                    initial_task_loss = task_loss.data.cpu()
+                else:
+                    initial_task_loss = task_loss.data
+                initial_task_loss = initial_task_loss.numpy()
 
             # get the total loss
             loss = torch.sum(weighted_task_loss)
@@ -102,20 +106,28 @@ def train_toy_example(args):
 
                 # compute the inverse training rate r_i(t) 
                 # \curl{L}_i 
-                loss_ratio = task_loss.data.numpy() / initial_task_loss
+                if torch.cuda.is_available():
+                    loss_ratio = task_loss.data.cpu().numpy() / initial_task_loss
+                else:
+                    loss_ratio = task_loss.data.numpy() / initial_task_loss
                 # r_i(t)
                 inverse_train_rate = loss_ratio / np.mean(loss_ratio)
                 #print('r_i(t): {}'.format(inverse_train_rate))
 
 
                 # compute the mean norm \tilde{G}_w(t) 
-                mean_norm = np.mean(norms.data.numpy())
+                if torch.cuda.is_available():
+                    mean_norm = np.mean(norms.data.cpu().numpy())
+                else:
+                    mean_norm = np.mean(norms.data.numpy())
                 #print('tilde G_w(t): {}'.format(mean_norm))
 
 
                 # compute the GradNorm loss 
                 # this term has to remain constant
                 constant_term = torch.tensor(mean_norm * (inverse_train_rate ** args.alpha), requires_grad=False)
+                if torch.cuda.is_available():
+                    constant_term = constant_term.cuda()
                 #print('Constant term: {}'.format(constant_term))
                 # this is the GradNorm loss itself
                 grad_norm_loss = torch.tensor(torch.sum(torch.abs(norms - constant_term)))
@@ -126,7 +138,6 @@ def train_toy_example(args):
 
             # do a step with the optimizer
             optimizer.step()
-
             '''
             print('')
             wait = input("PRESS ENTER TO CONTINUE.")
@@ -138,14 +149,24 @@ def train_toy_example(args):
         model.weights.data = model.weights.data * normalize_coeff
 
         # record
-        task_losses.append(task_loss.data.numpy())
-        loss_ratios.append(np.sum(task_losses[-1] / task_losses[0]))
-        weights.append(model.weights.data.numpy())
-        grad_norm_losses.append(grad_norm_loss.data.numpy())
+        if torch.cuda.is_available():
+            task_losses.append(task_loss.data.cpu().numpy())
+            loss_ratios.append(np.sum(task_losses[-1] / task_losses[0]))
+            weights.append(model.weights.data.cpu().numpy())
+            grad_norm_losses.append(grad_norm_loss.data.cpu().numpy())
+        else:
+            task_losses.append(task_loss.data.numpy())
+            loss_ratios.append(np.sum(task_losses[-1] / task_losses[0]))
+            weights.append(model.weights.data.numpy())
+            grad_norm_losses.append(grad_norm_loss.data.numpy())
 
         if t % 100 == 0:
-            print('{}/{}: loss_ratio={}, weights={}, task_loss={}, grad_norm_loss={}'.format(
-                t, args.n_iter, loss_ratios[-1], model.weights.data.numpy(), task_loss.data.numpy(), grad_norm_loss.data.numpy()))
+            if torch.cuda.is_available():
+                print('{}/{}: loss_ratio={}, weights={}, task_loss={}, grad_norm_loss={}'.format(
+                                    t, args.n_iter, loss_ratios[-1], model.weights.data.cpu().numpy(), task_loss.data.cpu().numpy(), grad_norm_loss.data.cpu().numpy()))
+            else:
+                print('{}/{}: loss_ratio={}, weights={}, task_loss={}, grad_norm_loss={}'.format(
+                    t, args.n_iter, loss_ratios[-1], model.weights.data.numpy(), task_loss.data.numpy(), grad_norm_loss.data.numpy()))
 
     task_losses = np.array(task_losses)
     weights = np.array(weights)

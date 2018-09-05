@@ -35,8 +35,9 @@ class RegressionTrain(torch.nn.Module):
         task_loss = []
         for i in range(n_tasks):
             task_loss.append( self.mse_loss(ys[:,i,:], ts[:,i,:]) )
-        
-        return torch.stack(task_loss)
+        task_loss = torch.stack(task_loss)
+
+        return task_loss
 
 
     def get_last_shared_layer(self):
