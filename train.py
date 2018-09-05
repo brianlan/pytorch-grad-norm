@@ -178,7 +178,7 @@ def train_toy_example(args):
     ax1 = fig.add_subplot(2, 3, 1)
     ax1.set_title(r'Loss (scale $\sigma_0=1.0$)')
     ax2 = fig.add_subplot(2, 3, 2)
-    ax2.set_title(r'Loss (scale $\sigma_1=100.0)$')
+    ax2.set_title(r'Loss (scale $\sigma_1={})$'.format(sigmas[1]))
     ax3 = fig.add_subplot(2, 3, 3)
     ax3.set_title(r"$\sum_i L_i(t) / L_i(0)$")
     ax4 = fig.add_subplot(2, 3, 4)
