@@ -131,7 +131,7 @@ def train_toy_example(args):
                     constant_term = constant_term.cuda()
                 #print('Constant term: {}'.format(constant_term))
                 # this is the GradNorm loss itself
-                grad_norm_loss = torch.tensor(torch.sum(torch.abs(norms - constant_term)))
+                grad_norm_loss = torch.sum(torch.abs(norms - constant_term))
                 #print('GradNorm loss {}'.format(grad_norm_loss))
 
                 # compute the gradient for the weights
